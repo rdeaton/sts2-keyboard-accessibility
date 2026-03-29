@@ -1,0 +1,10 @@
+{
+  "id": "KeyboardAccessibility",
+  "name": "Keyboard Accessibility",
+  "author": "rdeaton",
+  "description": "Adds keyboard shortcuts for navigating menus, selecting rewards, and other UI interactions.",
+  "version": "0.1.0",
+  "has_pck": false,
+  "has_dll": true,
+  "affects_gameplay": false
+}
