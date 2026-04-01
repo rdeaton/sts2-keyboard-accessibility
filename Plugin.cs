@@ -1,6 +1,7 @@
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Modding;
+using MegaCrit.Sts2.Core.Saves;
 
 namespace KeyboardAccessibility;
 
@@ -17,21 +18,20 @@ public static class Plugin
 
         SceneTree tree = (SceneTree)Engine.GetMainLoop();
         GlobalInputHandler.Register(tree);
-
-        // IsRunningModded is set based on LoadedMods.Count > 0, which routes
-        // saves to a "modded/" subdirectory. affects_gameplay only controls
-        // multiplayer checks, not save paths. Mark our state as Disabled so
-        // GetLoadedMods() (which filters by state == Loaded) excludes us.
-        // We can't remove from _mods directly — it's being iterated in a foreach.
-        ModManager.OnModDetected += OnModDetected;
     }
+}
 
-    private static void OnModDetected(Mod mod)
+// IsRunningModded() gates the "modded/" prefix in save paths
+// (UserDataPathProvider.GetProfileDir). affects_gameplay only controls
+// multiplayer checks, not save routing. Patch GetProfileDir directly
+// so the save path is always the unmodded location, regardless of
+// event-handler timing or other mods' load state.
+[HarmonyPatch(typeof(UserDataPathProvider), nameof(UserDataPathProvider.GetProfileDir))]
+static class SavePathPatch
+{
+    static bool Prefix(int profileId, ref string __result)
     {
-        if (mod.manifest?.id != "KeyboardAccessibility")
-            return;
-
-        ModManager.OnModDetected -= OnModDetected;
-        mod.state = ModLoadState.Disabled;
+        __result = $"profile{profileId}";
+        return false;
     }
 }
