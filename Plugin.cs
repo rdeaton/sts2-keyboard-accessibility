@@ -1,3 +1,4 @@
+using System;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Modding;
@@ -10,14 +11,25 @@ public static class Plugin
 {
     public static void Initialize()
     {
-        var harmony = new Harmony("KeyboardAccessibility");
-        harmony.PatchAll(typeof(Plugin).Assembly);
+        try
+        {
+            GD.Print("[KeyboardAccessibility] Initializing...");
 
-        CombatState.InitDelegates();
-        ModConfig.Load();
+            var harmony = new Harmony("KeyboardAccessibility");
+            harmony.PatchAll(typeof(Plugin).Assembly);
+            GD.Print("[KeyboardAccessibility] Harmony patches applied.");
 
-        SceneTree tree = (SceneTree)Engine.GetMainLoop();
-        GlobalInputHandler.Register(tree);
+            CombatState.InitDelegates();
+            ModConfig.Load();
+
+            SceneTree tree = (SceneTree)Engine.GetMainLoop();
+            GlobalInputHandler.Register(tree);
+            GD.Print("[KeyboardAccessibility] Initialized successfully.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[KeyboardAccessibility] Failed to initialize: {ex}");
+        }
     }
 }
 

@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.ControllerInput;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
@@ -16,6 +18,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
+using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 
 namespace KeyboardAccessibility;
 
@@ -79,6 +82,41 @@ public static class GlobalInputHandler
         BindingFlags.NonPublic | BindingFlags.Instance
     )!;
 
+    private static readonly FieldInfo ChooseCardRowField = typeof(NChooseACardSelectionScreen).GetField(
+        "_cardRow",
+        BindingFlags.NonPublic | BindingFlags.Instance
+    )!;
+
+    private static readonly FieldInfo CharCardContainerField = typeof(NMerchantInventory).GetField(
+        "_characterCardContainer",
+        BindingFlags.NonPublic | BindingFlags.Instance
+    )!;
+
+    private static readonly FieldInfo ColorlessCardContainerField = typeof(NMerchantInventory).GetField(
+        "_colorlessCardContainer",
+        BindingFlags.NonPublic | BindingFlags.Instance
+    )!;
+
+    private static readonly FieldInfo RelicContainerField = typeof(NMerchantInventory).GetField(
+        "_relicContainer",
+        BindingFlags.NonPublic | BindingFlags.Instance
+    )!;
+
+    private static readonly FieldInfo PotionContainerField = typeof(NMerchantInventory).GetField(
+        "_potionContainer",
+        BindingFlags.NonPublic | BindingFlags.Instance
+    )!;
+
+    private static readonly FieldInfo CardRemovalField = typeof(NMerchantInventory).GetField(
+        "_cardRemovalNode",
+        BindingFlags.NonPublic | BindingFlags.Instance
+    )!;
+
+    private static readonly MethodInfo SlotOnReleasedMethod = typeof(NMerchantSlot).GetMethod(
+        "OnReleased",
+        BindingFlags.NonPublic | BindingFlags.Instance
+    )!;
+
     private static NRewardsScreen? _lastRewardsScreen;
     private static int _lastButtonCount;
 
@@ -87,6 +125,10 @@ public static class GlobalInputHandler
 
     private static NCardGridSelectionScreen? _lastGridScreen;
     private static int _gridSelectedRow;
+
+    private static NMerchantInventory? _lastMerchantInventory;
+    private static int _merchantSelectedRow;
+    private static List<NMerchantSlot> _lastMerchantRowSlots = new();
 
     private static void RegisterAction(StringName action, Key key, bool shift = false)
     {
@@ -144,8 +186,10 @@ public static class GlobalInputHandler
         TryHandleRewardsScreen(currentScreen);
         TryHandleMapScreen(currentScreen);
         TryHandleRestSite(currentScreen);
+        TryHandleChooseACardScreen(currentScreen);
         TryHandleCardGridSelection(currentScreen);
         TryHandleEventScreen(currentScreen);
+        TryHandleMerchantShop(currentScreen);
     }
 
     private static void TryHandleTreasureRoom(IScreenContext? currentScreen)
@@ -202,6 +246,26 @@ public static class GlobalInputHandler
         var altIdx = GetPressedIndex(altButtons.Count, startIndex: holders.Count);
         if (altIdx is int j)
             altButtons[j].ForceClick();
+    }
+
+    private static void TryHandleChooseACardScreen(IScreenContext? currentScreen)
+    {
+        if (currentScreen is not NChooseACardSelectionScreen chooseScreen)
+            return;
+
+        if (!chooseScreen.IsVisibleInTree())
+            return;
+
+        var cardRow = (Control)ChooseCardRowField.GetValue(chooseScreen)!;
+        var holders = cardRow.GetChildren().OfType<NGridCardHolder>().Where(h => !h.IsQueuedForDeletion()).ToList();
+        if (holders.Count == 0)
+            return;
+
+        LabelItems(holders, 28, new Vector2(40, 40), _ => new Vector2(-20, -236));
+
+        var idx = GetPressedIndex(holders.Count);
+        if (idx is int i)
+            holders[i].EmitSignal(NCardHolder.SignalName.Pressed, holders[i]);
     }
 
     private static void TryHandleMapScreen(IScreenContext? currentScreen)
@@ -394,5 +458,124 @@ public static class GlobalInputHandler
             rewardButton.ForceClick();
         else if (button is NLinkedRewardSet linkedSet)
             linkedSet.GrabFocus();
+    }
+
+    private static void TryHandleMerchantShop(IScreenContext? currentScreen)
+    {
+        if (currentScreen is NMerchantRoom merchantRoom)
+        {
+            if ((Input.IsActionJustPressed(SelectActions[0]) || Input.IsActionJustPressed(ConfirmAction))
+                && merchantRoom.MerchantButton.IsEnabled)
+                merchantRoom.OpenInventory();
+            return;
+        }
+
+        if (currentScreen is not NMerchantInventory inventory)
+        {
+            if (_lastMerchantInventory != null)
+            {
+                ClearMerchantRowLabels();
+                _lastMerchantInventory = null;
+                _merchantSelectedRow = 0;
+            }
+            return;
+        }
+
+        var rows = GetMerchantRows(inventory);
+        if (rows.Count == 0)
+            return;
+
+        bool rowChanged = false;
+        if (inventory != _lastMerchantInventory)
+        {
+            _lastMerchantInventory = inventory;
+            _merchantSelectedRow = 0;
+            rowChanged = true;
+        }
+
+        if (rows.Count > 1 && Input.IsActionJustPressed(NextRowAction))
+        {
+            ClearMerchantRowLabels();
+            _merchantSelectedRow = (_merchantSelectedRow + 1) % rows.Count;
+            rowChanged = true;
+        }
+        else if (rows.Count > 1 && Input.IsActionJustPressed(PrevRowAction))
+        {
+            ClearMerchantRowLabels();
+            _merchantSelectedRow = (_merchantSelectedRow - 1 + rows.Count) % rows.Count;
+            rowChanged = true;
+        }
+
+        if (_merchantSelectedRow >= rows.Count)
+        {
+            _merchantSelectedRow = 0;
+            rowChanged = true;
+        }
+
+        var activeRow = rows[_merchantSelectedRow];
+
+        if (rowChanged || !activeRow.SequenceEqual(_lastMerchantRowSlots))
+        {
+            ClearMerchantRowLabels();
+            _lastMerchantRowSlots = activeRow;
+            if (_merchantSelectedRow == 0)
+                LabelItems(activeRow, 36, new Vector2(48, 48), _ => new Vector2(-24, -272));
+            else
+                LabelItems(activeRow, 36, new Vector2(48, 48), s => s switch
+                {
+                    NMerchantRelic => new Vector2(-20, -128),
+                    NMerchantPotion => new Vector2(-20, -92),
+                    NMerchantCardRemoval => new Vector2(-20, -176),
+                    _ => new Vector2(-20, -224),
+                });
+        }
+
+        var idx = GetPressedIndex(activeRow.Count);
+        if (idx is int i && activeRow[i].Entry.IsStocked)
+            TaskHelper.RunSafely((Task)SlotOnReleasedMethod.Invoke(activeRow[i], null)!);
+    }
+
+    private static List<List<NMerchantSlot>> GetMerchantRows(NMerchantInventory inventory)
+    {
+        var rows = new List<List<NMerchantSlot>>();
+
+        var charContainer = (Control?)CharCardContainerField.GetValue(inventory);
+        var topRow = charContainer?.GetChildren().OfType<NMerchantSlot>()
+            .Where(s => s.Visible).ToList() ?? new List<NMerchantSlot>();
+        if (topRow.Count > 0)
+            rows.Add(topRow);
+
+        var bottomRow = new List<NMerchantSlot>();
+
+        var colorlessContainer = (Control?)ColorlessCardContainerField.GetValue(inventory);
+        if (colorlessContainer != null)
+            bottomRow.AddRange(colorlessContainer.GetChildren().OfType<NMerchantSlot>().Where(s => s.Visible));
+
+        var relicContainer = (Control?)RelicContainerField.GetValue(inventory);
+        if (relicContainer != null)
+            bottomRow.AddRange(relicContainer.GetChildren().OfType<NMerchantSlot>().Where(s => s.Visible));
+
+        var potionContainer = (Control?)PotionContainerField.GetValue(inventory);
+        if (potionContainer != null)
+            bottomRow.AddRange(potionContainer.GetChildren().OfType<NMerchantSlot>().Where(s => s.Visible));
+
+        var cardRemoval = CardRemovalField.GetValue(inventory) as NMerchantSlot;
+        if (cardRemoval != null && cardRemoval.Visible)
+            bottomRow.Add(cardRemoval);
+
+        if (bottomRow.Count > 0)
+            rows.Add(bottomRow);
+
+        return rows;
+    }
+
+    private static void ClearMerchantRowLabels()
+    {
+        foreach (var slot in _lastMerchantRowSlots)
+        {
+            if (GodotObject.IsInstanceValid(slot))
+                NumberLabels.Remove(slot);
+        }
+        _lastMerchantRowSlots = new List<NMerchantSlot>();
     }
 }
