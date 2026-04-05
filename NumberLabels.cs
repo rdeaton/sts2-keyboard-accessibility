@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Godot;
 
 namespace KeyboardAccessibility;
@@ -5,6 +6,8 @@ namespace KeyboardAccessibility;
 internal static class NumberLabels
 {
     internal const string LabelName = "KA_NumberLabel";
+
+    private static readonly HashSet<Node> _labeledNodes = new();
 
     internal static void AddOrUpdate(
         Node parent,
@@ -39,11 +42,23 @@ internal static class NumberLabels
         label.MouseFilter = Control.MouseFilterEnum.Ignore;
 
         parent.AddChild(label);
+        _labeledNodes.Add(parent);
     }
 
     internal static void Remove(Node parent)
     {
         var existing = parent.GetNodeOrNull<Label>(LabelName);
         existing?.QueueFree();
+        _labeledNodes.Remove(parent);
+    }
+
+    internal static void RemoveAll()
+    {
+        foreach (var node in _labeledNodes)
+        {
+            if (GodotObject.IsInstanceValid(node))
+                node.GetNodeOrNull<Label>(LabelName)?.QueueFree();
+        }
+        _labeledNodes.Clear();
     }
 }

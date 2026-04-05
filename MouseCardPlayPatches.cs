@@ -58,6 +58,14 @@ internal static class MouseCardPlayPatches
         return true;
     }
 
+    [HarmonyPostfix]
+    [HarmonyPatch("IsCardInPlayZone")]
+    static void IsCardInPlayZonePostfix(bool ____skipStartCardDrag, ref bool __result)
+    {
+        if (____skipStartCardDrag)
+            __result = true;
+    }
+
     [HarmonyPrefix]
     [HarmonyPatch("MultiCreatureTargeting")]
     static bool MultiCreatureTargetingPrefix(

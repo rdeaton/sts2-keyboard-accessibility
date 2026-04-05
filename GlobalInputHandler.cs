@@ -19,6 +19,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
+using MegaCrit.Sts2.Core.Nodes.Screens.TreasureRoomRelic;
 
 namespace KeyboardAccessibility;
 
@@ -44,6 +45,16 @@ public static class GlobalInputHandler
 
     private static readonly FieldInfo ChestButtonField = typeof(NTreasureRoom).GetField(
         "_chestButton",
+        BindingFlags.NonPublic | BindingFlags.Instance
+    )!;
+
+    private static readonly FieldInfo RelicCollectionField = typeof(NTreasureRoom).GetField(
+        "_relicCollection",
+        BindingFlags.NonPublic | BindingFlags.Instance
+    )!;
+
+    private static readonly FieldInfo HoldersInUseField = typeof(NTreasureRoomRelicCollection).GetField(
+        "_holdersInUse",
         BindingFlags.NonPublic | BindingFlags.Instance
     )!;
 
@@ -117,6 +128,9 @@ public static class GlobalInputHandler
         BindingFlags.NonPublic | BindingFlags.Instance
     )!;
 
+    private static NCardRewardSelectionScreen? _lastCardRewardScreen;
+    private static List<NGridCardHolder> _lastCardRewardHolders = new();
+
     private static NRewardsScreen? _lastRewardsScreen;
     private static int _lastButtonCount;
 
@@ -129,6 +143,8 @@ public static class GlobalInputHandler
     private static NMerchantInventory? _lastMerchantInventory;
     private static int _merchantSelectedRow;
     private static List<NMerchantSlot> _lastMerchantRowSlots = new();
+
+    private static IScreenContext? _lastScreen;
 
     private static void RegisterAction(StringName action, Key key, bool shift = false)
     {
@@ -181,6 +197,11 @@ public static class GlobalInputHandler
             ModConfig.ToggleAutoPlay();
 
         var currentScreen = ActiveScreenContext.Instance.GetCurrentScreen();
+        if (currentScreen != _lastScreen)
+        {
+            NumberLabels.RemoveAll();
+            _lastScreen = currentScreen;
+        }
         TryHandleTreasureRoom(currentScreen);
         TryHandleCardRewardScreen(currentScreen);
         TryHandleRewardsScreen(currentScreen);
@@ -197,6 +218,13 @@ public static class GlobalInputHandler
         if (currentScreen is not NTreasureRoom treasureRoom)
             return;
 
+        var relicCollection = (NTreasureRoomRelicCollection)RelicCollectionField.GetValue(treasureRoom)!;
+        if (relicCollection.IsVisibleInTree())
+        {
+            TryHandleRelicSelection(relicCollection);
+            return;
+        }
+
         if (!Input.IsActionJustPressed(SelectActions[0]) && !Input.IsActionJustPressed(ConfirmAction))
             return;
 
@@ -205,18 +233,57 @@ public static class GlobalInputHandler
             chestButton.ForceClick();
     }
 
+    private static void TryHandleRelicSelection(NTreasureRoomRelicCollection relicCollection)
+    {
+        var holders = (List<NTreasureRoomRelicHolder>)HoldersInUseField.GetValue(relicCollection)!;
+        var visibleHolders = holders.Where(h => h.Visible).ToList();
+        if (visibleHolders.Count == 0)
+            return;
+
+        LabelItems(visibleHolders, 28, new Vector2(40, 40), _ => new Vector2(-20, -100));
+
+        if (visibleHolders.Count == 1)
+        {
+            if ((Input.IsActionJustPressed(SelectActions[0]) || Input.IsActionJustPressed(ConfirmAction))
+                && visibleHolders[0].IsEnabled)
+                visibleHolders[0].ForceClick();
+            return;
+        }
+
+        var idx = GetPressedIndex(visibleHolders.Count);
+        if (idx is int i && visibleHolders[i].IsEnabled)
+            visibleHolders[i].ForceClick();
+    }
+
     private static void TryHandleCardRewardScreen(IScreenContext? currentScreen)
     {
         if (currentScreen is not NCardRewardSelectionScreen cardRewardScreen)
+        {
+            _lastCardRewardScreen = null;
+            _lastCardRewardHolders = new();
             return;
+        }
 
         if (!cardRewardScreen.IsVisibleInTree())
             return;
 
         var cardRow = (Control)CardRowField.GetValue(cardRewardScreen)!;
-        // GetChildren() order matches AddChild() order, which is left-to-right.
-        // Do NOT sort by Position.X — positions are animated with a 0.5s tween.
-        var holders = cardRow.GetChildren().OfType<NGridCardHolder>().Where(h => !h.IsQueuedForDeletion()).ToList();
+        // Cache holder order on first encounter — GetChildren() order matches AddChild()
+        // order (left-to-right) initially, but hovering a card with the mouse can reorder
+        // children in the scene tree for z-ordering. Do NOT re-query each frame.
+        var currentHolders = cardRow.GetChildren().OfType<NGridCardHolder>()
+            .Where(h => !h.IsQueuedForDeletion()).ToList();
+        if (currentHolders.Count == 0)
+            return;
+
+        if (cardRewardScreen != _lastCardRewardScreen || _lastCardRewardHolders.Count == 0)
+        {
+            _lastCardRewardScreen = cardRewardScreen;
+            _lastCardRewardHolders = currentHolders;
+        }
+
+        var liveSet = new HashSet<NGridCardHolder>(currentHolders);
+        var holders = _lastCardRewardHolders.Where(h => liveSet.Contains(h)).ToList();
         if (holders.Count == 0)
             return;
 
