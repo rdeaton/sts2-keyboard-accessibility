@@ -19,6 +19,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
+using MegaCrit.Sts2.Core.Nodes.Events.Custom;
 using MegaCrit.Sts2.Core.Nodes.Screens.TreasureRoomRelic;
 
 namespace KeyboardAccessibility;
@@ -123,8 +124,13 @@ public static class GlobalInputHandler
         BindingFlags.NonPublic | BindingFlags.Instance
     )!;
 
-    private static readonly MethodInfo SlotOnReleasedMethod = typeof(NMerchantSlot).GetMethod(
-        "OnReleased",
+    private static readonly MethodInfo SlotOnSelectedMethod = typeof(NMerchantSlot).GetMethod(
+        "OnSelected",
+        BindingFlags.NonPublic | BindingFlags.Instance
+    )!;
+
+    private static readonly MethodInfo FakeMerchantOpenInventoryMethod = typeof(NFakeMerchant).GetMethod(
+        "OpenInventory",
         BindingFlags.NonPublic | BindingFlags.Instance
     )!;
 
@@ -268,11 +274,12 @@ public static class GlobalInputHandler
             return;
 
         var cardRow = (Control)CardRowField.GetValue(cardRewardScreen)!;
-        // Cache holder order on first encounter — GetChildren() order matches AddChild()
-        // order (left-to-right) initially, but hovering a card with the mouse can reorder
-        // children in the scene tree for z-ordering. Do NOT re-query each frame.
+        // Sort by X position rather than relying on scene tree order, which can be
+        // reordered for z-ordering if the mouse cursor is already over a card.
         var currentHolders = cardRow.GetChildren().OfType<NGridCardHolder>()
-            .Where(h => !h.IsQueuedForDeletion()).ToList();
+            .Where(h => !h.IsQueuedForDeletion())
+            .OrderBy(h => h.GlobalPosition.X)
+            .ToList();
         if (currentHolders.Count == 0)
             return;
 
@@ -284,8 +291,12 @@ public static class GlobalInputHandler
 
         var liveSet = new HashSet<NGridCardHolder>(currentHolders);
         var holders = _lastCardRewardHolders.Where(h => liveSet.Contains(h)).ToList();
+        // If all cached holders are gone (e.g. Driftwood reroll), adopt the new set.
         if (holders.Count == 0)
-            return;
+        {
+            _lastCardRewardHolders = currentHolders;
+            holders = currentHolders;
+        }
 
         var altContainer = (Control)RewardAlternativesField.GetValue(cardRewardScreen)!;
         var altButtons = altContainer
@@ -324,7 +335,10 @@ public static class GlobalInputHandler
             return;
 
         var cardRow = (Control)ChooseCardRowField.GetValue(chooseScreen)!;
-        var holders = cardRow.GetChildren().OfType<NGridCardHolder>().Where(h => !h.IsQueuedForDeletion()).ToList();
+        var holders = cardRow.GetChildren().OfType<NGridCardHolder>()
+            .Where(h => !h.IsQueuedForDeletion())
+            .OrderBy(h => h.GlobalPosition.X)
+            .ToList();
         if (holders.Count == 0)
             return;
 
@@ -537,6 +551,14 @@ public static class GlobalInputHandler
             return;
         }
 
+        if (currentScreen is NFakeMerchant fakeMerchant)
+        {
+            if ((Input.IsActionJustPressed(SelectActions[0]) || Input.IsActionJustPressed(ConfirmAction))
+                && fakeMerchant.MerchantButton.IsEnabled)
+                FakeMerchantOpenInventoryMethod.Invoke(fakeMerchant, null);
+            return;
+        }
+
         if (currentScreen is not NMerchantInventory inventory)
         {
             if (_lastMerchantInventory != null)
@@ -599,7 +621,7 @@ public static class GlobalInputHandler
 
         var idx = GetPressedIndex(activeRow.Count);
         if (idx is int i && activeRow[i].Entry.IsStocked)
-            TaskHelper.RunSafely((Task)SlotOnReleasedMethod.Invoke(activeRow[i], null)!);
+            TaskHelper.RunSafely((Task)SlotOnSelectedMethod.Invoke(activeRow[i], null)!);
     }
 
     private static List<List<NMerchantSlot>> GetMerchantRows(NMerchantInventory inventory)

@@ -48,7 +48,11 @@ internal static class NumberLabels
     internal static void Remove(Node parent)
     {
         var existing = parent.GetNodeOrNull<Label>(LabelName);
-        existing?.QueueFree();
+        if (existing != null)
+        {
+            parent.RemoveChild(existing);
+            existing.QueueFree();
+        }
         _labeledNodes.Remove(parent);
     }
 
@@ -57,7 +61,14 @@ internal static class NumberLabels
         foreach (var node in _labeledNodes)
         {
             if (GodotObject.IsInstanceValid(node))
-                node.GetNodeOrNull<Label>(LabelName)?.QueueFree();
+            {
+                var label = node.GetNodeOrNull<Label>(LabelName);
+                if (label != null)
+                {
+                    node.RemoveChild(label);
+                    label.QueueFree();
+                }
+            }
         }
         _labeledNodes.Clear();
     }
