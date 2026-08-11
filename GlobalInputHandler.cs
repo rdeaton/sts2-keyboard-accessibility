@@ -208,6 +208,7 @@ public static class GlobalInputHandler
             NumberLabels.RemoveAll();
             _lastScreen = currentScreen;
         }
+        TryHandleAcceptKey(currentScreen);
         TryHandleTreasureRoom(currentScreen);
         TryHandleCardRewardScreen(currentScreen);
         TryHandleRewardsScreen(currentScreen);
@@ -217,6 +218,63 @@ public static class GlobalInputHandler
         TryHandleCardGridSelection(currentScreen);
         TryHandleEventScreen(currentScreen);
         TryHandleMerchantShop(currentScreen);
+    }
+
+    // The game used to have a single "ui_accept" action bound to E, which both
+    // ended the turn in combat and confirmed/proceeded everywhere else. It was
+    // split into "ui_end_turn" (still E) and "ui_confirm" (Enter), so E stopped
+    // working as proceed on the reward, shop, map and rest screens.
+    //
+    // Re-emit the end turn key as a confirm action whenever we're not in the
+    // combat room, which restores the old feel without rebinding anything (a
+    // rebind can't express this, since one key has to mean both actions).
+    //
+    // We key off the game's own endTurn action rather than a raw keycode, so
+    // this follows whatever the player has bound End Turn to, in either the
+    // mouse+keyboard or the keyboard-only map.
+    //
+    // This is purely additive - the game still emits ui_end_turn for the same
+    // key press. That's harmless because NEndTurnButton only acts when the hand
+    // is in Play mode (NEndTurnButton.CanTurnBeEnded), so anywhere we hand E to
+    // a confirm button, the end turn button provably can't fire off the same
+    // press.
+    //
+    // That's also why the in-combat card selection prompts ("select a card to
+    // discard", etc) are included: they keep NCombatRoom as the active screen,
+    // but they put the hand in SimpleSelect/UpgradeSelect, which is mutually
+    // exclusive with the Play mode the end turn button requires. Their confirm
+    // button is an NConfirmButton bound to ui_confirm, and it stays disabled
+    // (so E does nothing) until the selection is actually valid.
+    private static void TryHandleAcceptKey(IScreenContext? currentScreen)
+    {
+        if (currentScreen is NCombatRoom && !IsHandInCardSelection())
+            return;
+
+        if (Input.IsActionJustPressed(MegaInput.endTurn))
+            EmitConfirm(pressed: true);
+
+        // Buttons register a release handler alongside the press one, so send
+        // both edges to avoid leaving them stuck in a pressed state.
+        if (Input.IsActionJustReleased(MegaInput.endTurn))
+            EmitConfirm(pressed: false);
+    }
+
+    private static bool IsHandInCardSelection()
+    {
+        var combatRoom = NCombatRoom.Instance;
+        if (combatRoom == null)
+            return false;
+
+        var hand = combatRoom.Ui?.Hand;
+        return hand != null && hand.IsInCardSelection;
+    }
+
+    private static void EmitConfirm(bool pressed)
+    {
+        var ev = new InputEventAction();
+        ev.Action = MegaInput.confirm;
+        ev.Pressed = pressed;
+        Input.ParseInputEvent(ev);
     }
 
     private static void TryHandleTreasureRoom(IScreenContext? currentScreen)

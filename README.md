@@ -33,6 +33,14 @@ Download the latest release and copy the KeyboardAccessibility directory into:
 
 # Functionality
 
+The game split its old "accept" action (E) into separate End Turn (E) and
+Confirm (Enter) actions, so E stopped working as proceed/confirm outside of
+combat. This mod restores the old behavior: E confirms on the post-combat
+rewards, shop, map, rest site and card reward screens, as well as the in-combat
+card selection prompts ("select a card to discard", and similar). It still ends
+your turn during normal combat. This follows whatever you've bound End Turn to,
+so rebinding still works.
+
 During combat, there's a setting for whether to auto-play cards when they have
 one target. It can be enabled/disabled with F7 or in the Settings->General
 menu. Cards that are self-targeted can be played with Space or Enter when

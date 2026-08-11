@@ -15,6 +15,12 @@
 
   <ItemGroup>
     <Compile Remove="decomp/**" />
+    <!-- lib/ holds vendored game assemblies for CI (-p:GameDataDir=lib). The SDK's
+         default globs would otherwise make them candidate assembly files, which
+         MSBuild prefers over HintPath - silently building against a stale copy
+         instead of the installed game. -->
+    <None Remove="lib/**" />
+    <Content Remove="lib/**" />
   </ItemGroup>
 
   <ItemGroup>
